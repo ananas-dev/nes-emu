@@ -11,13 +11,12 @@ enum AddrMode {
     IndY,
     Rel,
     Acc,
-    Imp,
 }
 
 enum StatusFlag {
     Carry,
     Zero,
-    InterrupDisable,
+    InterruptDisable,
     Decimal,
     BreakCommand,
     Overflow,
@@ -29,7 +28,7 @@ impl Into<u8> for StatusFlag {
         match self {
             StatusFlag::Carry => 0b00000001,
             StatusFlag::Zero => 0b00000010,
-            StatusFlag::InterrupDisable => 0b00000100,
+            StatusFlag::InterruptDisable => 0b00000100,
             StatusFlag::Decimal => 0b00001000,
             StatusFlag::BreakCommand => 0b00010000,
             StatusFlag::Overflow => 0b00100000,
@@ -87,7 +86,7 @@ impl Cpu {
         let low = self.mem_read(addr) as u16;
         let high = self.mem_read(addr + 1) as u16;
         
-        (high << 8) | (low as u16)
+        (high << 8) | low
     }
 
     fn mem_write(&mut self, addr: u16, data: u8) {
@@ -121,11 +120,52 @@ impl Cpu {
     fn addr_mode_read(&mut self, mode: AddrMode) -> u8 {
         match mode {
             AddrMode::Imm => self.read(),
-            AddrMode::Zpg => self.memory[self.read_u16() as usize],
-            AddrMode::ZpgX => self.memory[self.read_u16() as usize + self.x as usize],
-            AddrMode::ZpgY => self.memory[self.read_u16() as usize + self.y as usize],
+            AddrMode::Zpg => {
+                let addr = self.read();
+                self.mem_read(addr as u16)
+            },
+            AddrMode::ZpgX => {
+                let addr = self.read().wrapping_add(self.x);
+                self.mem_read(addr as u16)
+            },
+            AddrMode::ZpgY => {
+                let addr = self.read().wrapping_add(self.y);
+                self.mem_read(addr as u16)
+            },
+            AddrMode::Abs => {
+                let addr = self.read_u16();
+                self.mem_read(addr)
+
+            }
+            AddrMode::AbsX => {
+                let addr = self.read_u16().wrapping_add(self.x as u16);
+                self.mem_read(addr)
+            }
+            AddrMode::AbsY => {
+                let addr = self.read_u16().wrapping_add(self.y as u16);
+                self.mem_read(addr)
+            }
             _ => panic!("Cannot read from this addressing mode"),
         }
+    }
+
+    fn addr_mode_write(&mut self, mode: AddrMode, data: u8) {
+        match mode {
+            AddrMode::Zpg => {
+                let addr = self.read();
+                self.mem_write(addr as u16, data);
+            },
+            AddrMode::ZpgX => {
+                let addr = self.read() + self.x;
+                self.mem_write(addr as u16, data);
+            },
+            AddrMode::ZpgY => {
+                let addr = self.read() + self.y;
+                self.mem_write(addr as u16, data);
+            },
+            _ => panic!("Cannot write from this addressing mode"),
+        }
+
     }
     
     pub fn exec(&mut self) {
@@ -140,6 +180,39 @@ impl Cpu {
             0xB9 => self.lda(AddrMode::AbsY),
             0xA1 => self.lda(AddrMode::IndX),
             0xB1 => self.lda(AddrMode::IndY),
+
+            0xA2 => self.ldx(AddrMode::Imm),
+            0xA6 => self.ldx(AddrMode::Zpg),
+            0xB6 => self.ldx(AddrMode::ZpgY),
+            0xAE => self.ldx(AddrMode::Abs),
+            0xBE => self.ldx(AddrMode::AbsY),
+
+            0xA0 => self.ldy(AddrMode::Imm),
+            0xA4 => self.ldy(AddrMode::Zpg),
+            0xB4 => self.ldy(AddrMode::ZpgX),
+            0xAC => self.ldy(AddrMode::Abs),
+            0xBC => self.ldy(AddrMode::AbsX),
+            
+            0x85 => self.sta(AddrMode::Zpg),
+            0x95 => self.sta(AddrMode::ZpgX),
+            0x8D => self.sta(AddrMode::Abs),
+            0x9D => self.sta(AddrMode::AbsX),
+            0x99 => self.sta(AddrMode::AbsY),
+            0x81 => self.sta(AddrMode::IndX),
+            0x91 => self.sta(AddrMode::IndY),
+
+            0x86 => self.stx(AddrMode::Zpg),
+            0x96 => self.stx(AddrMode::ZpgY),
+            0x8E => self.stx(AddrMode::Abs),
+
+            0x84 => self.sty(AddrMode::Zpg),
+            0x94 => self.sty(AddrMode::ZpgX),
+            0x8C => self.sty(AddrMode::Abs),
+
+            0xAA => self.tax(),
+
+            0xA8 => self.tay(),
+
             _ => panic!("Unknown instruction: {:#04X} at {:#06X}", opcode, self.pc - 1),
         }
     }
@@ -170,9 +243,40 @@ impl Cpu {
 
     fn lda(&mut self, mode: AddrMode) {
         self.a = self.addr_mode_read(mode);
-        self.update_nz(self.a)
+        self.update_nz(self.a);
     }
 
+    fn ldx(&mut self, mode: AddrMode) {
+        self.x = self.addr_mode_read(mode);
+        self.update_nz(self.x);
+    }
+    
+    fn ldy(&mut self, mode: AddrMode) {
+        self.y = self.addr_mode_read(mode);
+        self.update_nz(self.y);
+    }
+
+    fn sta(&mut self, mode: AddrMode) {
+        self.addr_mode_write(mode, self.a)
+    }
+
+    fn stx(&mut self, mode: AddrMode) {
+        self.addr_mode_write(mode, self.x)
+    }
+
+    fn sty(&mut self, mode: AddrMode) {
+        self.addr_mode_write(mode, self.y)
+    }
+
+    fn tax(&mut self) {
+        self.x = self.a;
+        self.update_nz(self.x);
+    }
+
+    fn tay(&mut self) {
+        self.y = self.a;
+        self.update_nz(self.y);
+    }
 }
 
 #[cfg(test)]
@@ -191,14 +295,42 @@ mod tests {
     }
 
     #[test]
+    fn test_addr_mode_read() {
+        let mut cpu = Cpu::new();
+
+        // Immediate
+        cpu.load_and_run(vec![0xA9, 0x42]);
+        assert_eq!(cpu.a, 0x42);
+
+        cpu.mem_write(0x0069, 0x42);
+
+        // Zero page
+        cpu.load_and_run(vec![0xA5, 0x69]);
+        assert_eq!(cpu.a, 0x42);
+    }
+
+    #[test]
     fn test_lda() {
         let mut cpu = Cpu::new();
 
-        println!("{}", cpu.pc);
-
-        // Imm
         cpu.load_and_run(vec![0xA9, 0x42]);
         assert_eq!(cpu.a, 0x42);
+    }
+
+    #[test]
+    fn test_ldx() {
+        let mut cpu = Cpu::new();
+
+        cpu.load_and_run(vec![0xA2, 0x42]);
+        assert_eq!(cpu.x, 0x42);
+    }
+
+    #[test]
+    fn test_ldy() {
+        let mut cpu = Cpu::new();
+
+        cpu.load_and_run(vec![0xA0, 0x42]);
+        assert_eq!(cpu.y, 0x42);
     }
 
     #[test]
