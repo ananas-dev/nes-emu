@@ -59,35 +59,77 @@ impl Cpu {
         }
     }
 
-    fn read_byte(&mut self) -> u8 {
+    fn reset(&mut self) {
+        self.a = 0;
+        self.x = 0;
+        self.status = 0;
+
+        self.pc = self.mem_read_u16(0xFFFC);
+    }
+
+    fn load(&mut self, program: Vec<u8>) {
+        self.memory[0x8000 .. (0x8000 + program.len())].copy_from_slice(&program[..]);
+        self.mem_write_u16(0xFFFC, 0x8000)
+    }
+    
+    fn load_and_run(&mut self, program: Vec<u8>) {
+        self.load(program);
+        self.reset();
+
+        self.exec();
+    }
+
+    fn mem_read(&mut self, addr: u16) -> u8 {
+        self.memory[addr as usize]
+    }
+
+    fn mem_read_u16(&mut self, addr: u16) -> u16 {
+        let low = self.mem_read(addr) as u16;
+        let high = self.mem_read(addr + 1) as u16;
+        
+        (high << 8) | (low as u16)
+    }
+
+    fn mem_write(&mut self, addr: u16, data: u8) {
+        self.memory[addr as usize] = data;
+    }
+
+    fn mem_write_u16(&mut self, addr: u16, data: u16) {
+        let high = (data >> 8) as u8;
+        let low = (data & 0xFF) as u8;
+
+        self.mem_write(addr, low);
+        // TODO: is it really wrapping ??
+        self.mem_write(addr + 1, high)
+    }
+
+    fn read(&mut self) -> u8 {
         let data = self.memory[self.pc as usize];
         self.pc = self.pc.wrapping_add(1);
 
         data
     }
 
-    fn read_word(&mut self) -> u16 {
-        let low = self.memory[self.pc as usize] as u16;
-        let high = self.memory[self.pc as usize] as u16;
-        
+    fn read_u16(&mut self) -> u16 {
+        let data = self.mem_read_u16(self.pc);
         self.pc = self.pc.wrapping_add(2);
 
-        (high << 8) | (low as u16)
+        data
     }
 
 
     fn addr_mode_read(&mut self, mode: AddrMode) -> u8 {
         match mode {
-            AddrMode::Imm => self.read_byte(),
-            AddrMode::Zpg => self.memory[self.read_word() as usize],
-            AddrMode::ZpgX => self.memory[self.read_word() as usize + self.x as usize],
-            AddrMode::ZpgY => self.memory[self.read_word() as usize + self.y as usize],
+            AddrMode::Imm => self.read(),
+            AddrMode::Zpg => self.memory[self.read_u16() as usize],
+            AddrMode::ZpgX => self.memory[self.read_u16() as usize + self.x as usize],
+            AddrMode::ZpgY => self.memory[self.read_u16() as usize + self.y as usize],
             _ => panic!("Cannot read from this addressing mode"),
         }
     }
     
     pub fn exec(&mut self) {
-        let opcode = self.read_byte();
+        let opcode = self.read();
 
         match opcode {
             0xA9 => self.lda(AddrMode::Imm),
@@ -119,9 +161,6 @@ impl Cpu {
             self.unset_flag(StatusFlag::Zero)
         }
 
-        println!("{}", value);
-        println!("{}", value & 0x80);
-
         if value & 0x80 != 0 {
             self.set_flag(StatusFlag::Negative)  
         } else {
@@ -139,6 +178,28 @@ impl Cpu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_mem() {
+        let mut cpu = Cpu::new();
+
+        cpu.mem_write(0x69, 0x42);
+        assert_eq!(cpu.mem_read(0x69), 0x42);
+
+        cpu.mem_write_u16(0x69, 0x420);
+        assert_eq!(cpu.mem_read_u16(0x69), 0x420);
+    }
+
+    #[test]
+    fn test_lda() {
+        let mut cpu = Cpu::new();
+
+        println!("{}", cpu.pc);
+
+        // Imm
+        cpu.load_and_run(vec![0xA9, 0x42]);
+        assert_eq!(cpu.a, 0x42);
+    }
 
     #[test]
     fn test_flag() {
