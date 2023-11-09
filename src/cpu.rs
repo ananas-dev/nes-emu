@@ -59,27 +59,35 @@ impl Cpu {
         }
     }
 
-    fn addr_mode_read(&mut self, mode: AddrMode) -> u8 {
-        match mode {
-            AddrMode::Imm => {
-                let data = self.memory[self.pc as usize];
-                self.pc = self.pc.wrapping_add(1);
-
-                data
-            }
-            _ => panic!("Cannot read from this addressing mode"),
-        }
-    }
-
-    fn read8(&mut self) -> u8 {
+    fn read_byte(&mut self) -> u8 {
         let data = self.memory[self.pc as usize];
         self.pc = self.pc.wrapping_add(1);
 
         data
     }
 
+    fn read_word(&mut self) -> u16 {
+        let low = self.memory[self.pc as usize] as u16;
+        let high = self.memory[self.pc as usize] as u16;
+        
+        self.pc = self.pc.wrapping_add(2);
+
+        (high << 8) | (low as u16)
+    }
+
+
+    fn addr_mode_read(&mut self, mode: AddrMode) -> u8 {
+        match mode {
+            AddrMode::Imm => self.read_byte(),
+            AddrMode::Zpg => self.memory[self.read_word() as usize],
+            AddrMode::ZpgX => self.memory[self.read_word() as usize + self.x as usize],
+            AddrMode::ZpgY => self.memory[self.read_word() as usize + self.y as usize],
+            _ => panic!("Cannot read from this addressing mode"),
+        }
+    }
+    
     pub fn exec(&mut self) {
-        let opcode = self.read8();
+        let opcode = self.read_byte();
 
         match opcode {
             0xA9 => self.lda(AddrMode::Imm),
@@ -111,7 +119,10 @@ impl Cpu {
             self.unset_flag(StatusFlag::Zero)
         }
 
-        if value & 0b10000000 != 0 {
+        println!("{}", value);
+        println!("{}", value & 0x80);
+
+        if value & 0x80 != 0 {
             self.set_flag(StatusFlag::Negative)  
         } else {
             self.unset_flag(StatusFlag::Negative)
@@ -130,9 +141,36 @@ mod tests {
     use super::*;
 
     #[test]
-    #[should_panic]
-    fn test_exec() {
+    fn test_flag() {
         let mut cpu = Cpu::new();
-        cpu.exec();
+
+        cpu.set_flag(StatusFlag::Carry);
+        assert_eq!(cpu.status, 0b00000001);
+
+        cpu.set_flag(StatusFlag::Decimal);
+        assert_eq!(cpu.status, 0b00001001);
+
+        cpu.set_flag(StatusFlag::Negative);
+        assert_eq!(cpu.status, 0b01001001);
+
+        cpu.unset_flag(StatusFlag::Negative);
+        assert_eq!(cpu.status, 0b00001001);
+
+        cpu.unset_flag(StatusFlag::Decimal);
+        assert_eq!(cpu.status, 0b00000001);
+
+        cpu.unset_flag(StatusFlag::Carry);
+        assert_eq!(cpu.status, 0b00000000);
+    }
+
+    #[test]
+    fn test_update_nz() {
+        let mut cpu = Cpu::new();
+
+        cpu.update_nz(0b10000000);
+        assert_eq!(cpu.status, 0b01000000);
+
+        cpu.update_nz(0b0000000);
+        assert_eq!(cpu.status, 0b00000010);
     }
 }
