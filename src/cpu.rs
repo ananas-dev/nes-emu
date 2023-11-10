@@ -244,7 +244,6 @@ impl Cpu {
 
             0x28 => self.plp(),
 
-
             _ => panic!("Unknown instruction: {:#04X} at {:#06X}", opcode, self.pc - 1),
         }
     }
@@ -344,6 +343,21 @@ impl Cpu {
 
     fn plp(&mut self) {
         self.status = self.stack_pull();
+    }
+
+    fn and(&mut self, mode: AddrMode) {
+        self.a &= self.addr_mode_read(mode);
+        self.update_nz(self.a);
+    }
+
+    fn eor(&mut self, mode: AddrMode) {
+        self.a ^= self.addr_mode_read(mode);
+        self.update_nz(self.a);
+    }
+
+    fn ora(&mut self, mode: AddrMode) {
+        self.a |= self.addr_mode_read(mode);
+        self.update_nz(self.a);
     }
 }
 
