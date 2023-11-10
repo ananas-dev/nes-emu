@@ -1,3 +1,5 @@
+const STACK_ADDR: u16 = 0x0100;
+
 enum AddrMode {
     Imm,
     Zpg,
@@ -41,6 +43,7 @@ pub struct Cpu {
     pub a: u8,
     pub x: u8,
     pub y: u8,
+    pub s: u8,
     pub pc: u16,
     pub status: u8,
     memory: [u8; 0xFFFF],
@@ -52,6 +55,7 @@ impl Cpu {
             a: 0,
             x: 0,
             y: 0,
+            s: 0,
             pc: 0,
             status: 0,
             memory: [0; 0xFFFF],
@@ -61,6 +65,8 @@ impl Cpu {
     fn reset(&mut self) {
         self.a = 0;
         self.x = 0;
+        self.y = 0;
+        self.s = 0xFF;
         self.status = 0;
 
         self.pc = self.mem_read_u16(0xFFFC);
@@ -116,6 +122,15 @@ impl Cpu {
         data
     }
 
+    fn stack_push(&mut self, data: u8) {
+        self.mem_write(STACK_ADDR + self.s as u16, data);
+        self.s = self.s.wrapping_sub(1);
+    }
+
+    fn stack_pull(&mut self) -> u8 {
+        self.s = self.s.wrapping_add(1);
+        self.mem_read(STACK_ADDR + self.s as u16)
+    }
 
     fn addr_mode_read(&mut self, mode: AddrMode) -> u8 {
         match mode {
@@ -213,6 +228,23 @@ impl Cpu {
 
             0xA8 => self.tay(),
 
+            0x8A => self.txa(),
+
+            0x98 => self.tya(),
+
+            0xBA => self.tsx(),
+
+            0x9A => self.txs(),
+
+            0x48 => self.pha(),
+
+            0x08 => self.php(),
+
+            0x68 => self.pla(),
+
+            0x28 => self.plp(),
+
+
             _ => panic!("Unknown instruction: {:#04X} at {:#06X}", opcode, self.pc - 1),
         }
     }
@@ -276,6 +308,42 @@ impl Cpu {
     fn tay(&mut self) {
         self.y = self.a;
         self.update_nz(self.y);
+    }
+
+    fn txa(&mut self) {
+        self.a = self.x;
+        self.update_nz(self.a);
+    }
+
+    fn tya(&mut self) {
+        self.a = self.y;
+        self.update_nz(self.a);
+    }
+
+    fn tsx(&mut self) {
+        self.x = self.s;
+        self.update_nz(self.x);
+    }
+
+    fn txs(&mut self) {
+        self.s = self.x;
+    }
+
+    fn pha(&mut self) {
+        self.stack_push(self.a);
+    }
+
+    fn php(&mut self) {
+        self.stack_push(self.status);
+    }
+
+    fn pla(&mut self) {
+        self.a = self.stack_pull();
+        self.update_nz(self.a);
+    }
+
+    fn plp(&mut self) {
+        self.status = self.stack_pull();
     }
 }
 
