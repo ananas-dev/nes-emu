@@ -301,7 +301,7 @@ impl Cpu {
         self.status |= flag_repr
     }
 
-    fn unset_flag(&mut self, flag: StatusFlag) {
+    fn clear_flag(&mut self, flag: StatusFlag) {
         let flag_repr: u8 = flag.into();
         self.status &= !flag_repr
     }
@@ -315,13 +315,13 @@ impl Cpu {
         if value == 0 {
             self.set_flag(StatusFlag::Zero)  
         } else {
-            self.unset_flag(StatusFlag::Zero)
+            self.clear_flag(StatusFlag::Zero)
         }
 
         if value & 0x80 != 0 {
             self.set_flag(StatusFlag::Negative)  
         } else {
-            self.unset_flag(StatusFlag::Negative)
+            self.clear_flag(StatusFlag::Negative)
         }
     }
 
@@ -420,29 +420,44 @@ impl Cpu {
         if res == 0 {
             self.set_flag(StatusFlag::Zero);
         } else {
-            self.unset_flag(StatusFlag::Zero);
+            self.clear_flag(StatusFlag::Zero);
         }
 
         if m & 0x40 != 0 {
             self.set_flag(StatusFlag::Overflow)
         } else {
-            self.unset_flag(StatusFlag::Overflow)
+            self.clear_flag(StatusFlag::Overflow)
         }
 
         if m & 0x80 != 0 {
             self.set_flag(StatusFlag::Negative)
         } else {
-            self.unset_flag(StatusFlag::Negative)
+            self.clear_flag(StatusFlag::Negative)
         }
     }
 
+    // Should be tested
     fn adc(&mut self, mode: AddrMode) {
-        let m = self.addr_read(mode) + (self.status & 1);
+        let m = self.addr_read(mode);
+
+        let s = self.a.wrapping_add(m.wrapping_add(self.status & 1));
+
+        if m > 0xFF - self.a - (self.status & 1)  {
+            self.set_flag(StatusFlag::Carry);
+        } else {
+            self.clear_flag(StatusFlag::Carry);
+        }
+
+        // https://forums.nesdev.org/viewtopic.php?t=6331
+        if (self.a ^ s) & (m & s) & 0x80 != 0 {
+            self.set_flag(StatusFlag::Overflow);
+        } else {
+            self.clear_flag(StatusFlag::Overflow);
+        }
 
         self.a = self.a.wrapping_add(m);
-        self.update_nz(self.a);
 
-        todo!()
+        self.update_nz(self.a);
     }
 
     // TODO: rest of arithmetic
@@ -557,13 +572,13 @@ mod tests {
 
         assert_eq!(cpu.test_flag(StatusFlag::Negative), true);
 
-        cpu.unset_flag(StatusFlag::Negative);
+        cpu.clear_flag(StatusFlag::Negative);
         assert_eq!(cpu.status, 0b00001001);
 
-        cpu.unset_flag(StatusFlag::Decimal);
+        cpu.clear_flag(StatusFlag::Decimal);
         assert_eq!(cpu.status, 0b00000001);
 
-        cpu.unset_flag(StatusFlag::Carry);
+        cpu.clear_flag(StatusFlag::Carry);
         assert_eq!(cpu.status, 0b00000000);
     }
 
