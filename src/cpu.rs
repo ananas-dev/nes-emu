@@ -132,7 +132,6 @@ impl Cpu {
         self.mem_read(STACK_ADDR + self.s as u16)
     }
 
-    // Addressing is a mess fr
     fn addr(&mut self, mode: AddrMode) -> u16 {
         match mode {
             AddrMode::Imm => self.pc,
@@ -261,7 +260,8 @@ impl Cpu {
             0x01 => self.ora(AddrMode::IndX),
             0x11 => self.ora(AddrMode::IndY),
 
-            // ...
+            0x24 => self.bit(AddrMode::Zpg),
+            0x2C => self.bit(AddrMode::Abs),
 
             0x69 => self.adc(AddrMode::Imm),
             0x65 => self.adc(AddrMode::Zpg),
@@ -413,7 +413,28 @@ impl Cpu {
         self.update_nz(self.a);
     }
 
-    // TODO bit()
+    fn bit(&mut self, mode: AddrMode) {
+        let m = self.addr_read(mode);
+        let res = self.a & m;
+
+        if res == 0 {
+            self.set_flag(StatusFlag::Zero);
+        } else {
+            self.unset_flag(StatusFlag::Zero);
+        }
+
+        if m & 0x40 != 0 {
+            self.set_flag(StatusFlag::Overflow)
+        } else {
+            self.unset_flag(StatusFlag::Overflow)
+        }
+
+        if m & 0x80 != 0 {
+            self.set_flag(StatusFlag::Negative)
+        } else {
+            self.unset_flag(StatusFlag::Negative)
+        }
+    }
 
     fn adc(&mut self, mode: AddrMode) {
         let m = self.addr_read(mode) + (self.status & 1);
