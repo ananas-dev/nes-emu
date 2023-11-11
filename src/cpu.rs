@@ -132,57 +132,47 @@ impl Cpu {
         self.mem_read(STACK_ADDR + self.s as u16)
     }
 
-    fn addr_mode_read(&mut self, mode: AddrMode) -> u8 {
+    // Addressing is a mess fr
+    fn addr(&mut self, mode: AddrMode) -> u16 {
         match mode {
-            AddrMode::Imm => self.read(),
+            AddrMode::Imm => self.pc,
             AddrMode::Zpg => {
-                let addr = self.read();
-                self.mem_read(addr as u16)
+                self.read() as u16
             },
             AddrMode::ZpgX => {
-                let addr = self.read().wrapping_add(self.x);
-                self.mem_read(addr as u16)
+                let base = self.read() as u16;
+                base.wrapping_add(self.x as u16)
             },
             AddrMode::ZpgY => {
-                let addr = self.read().wrapping_add(self.y);
-                self.mem_read(addr as u16)
+                let base = self.read() as u16;
+                base.wrapping_add(self.y as u16)
             },
             AddrMode::Abs => {
-                let addr = self.read_u16();
-                self.mem_read(addr)
+                self.read_u16()
 
             }
             AddrMode::AbsX => {
-                let addr = self.read_u16().wrapping_add(self.x as u16);
-                self.mem_read(addr)
+                let base = self.read_u16();
+                base.wrapping_add(self.x as u16)
             }
             AddrMode::AbsY => {
-                let addr = self.read_u16().wrapping_add(self.y as u16);
-                self.mem_read(addr)
+                let base = self.read_u16();
+                base.wrapping_add(self.x as u16)
             }
-            _ => panic!("Cannot read from this addressing mode"),
+            _ => panic!("Not implemented"),
         }
     }
 
-    fn addr_mode_write(&mut self, mode: AddrMode, data: u8) {
-        match mode {
-            AddrMode::Zpg => {
-                let addr = self.read();
-                self.mem_write(addr as u16, data);
-            },
-            AddrMode::ZpgX => {
-                let addr = self.read() + self.x;
-                self.mem_write(addr as u16, data);
-            },
-            AddrMode::ZpgY => {
-                let addr = self.read() + self.y;
-                self.mem_write(addr as u16, data);
-            },
-            _ => panic!("Cannot write from this addressing mode"),
-        }
-
+    fn addr_read(&mut self, mode: AddrMode) -> u8 {
+        let addr = self.addr(mode);
+        self.mem_read(addr)
     }
-    
+
+    fn addr_write(&mut self, mode: AddrMode, data: u8) {
+        let addr = self.addr(mode);
+        self.mem_write(addr, data);
+    }
+
     pub fn exec(&mut self) {
         let opcode = self.read();
 
@@ -244,6 +234,64 @@ impl Cpu {
 
             0x28 => self.plp(),
 
+            0x29 => self.and(AddrMode::Imm),
+            0x25 => self.and(AddrMode::Zpg),
+            0x35 => self.and(AddrMode::ZpgX),
+            0x2D => self.and(AddrMode::Abs),
+            0x3D => self.and(AddrMode::AbsX),
+            0x39 => self.and(AddrMode::AbsY),
+            0x21 => self.and(AddrMode::IndX),
+            0x31 => self.and(AddrMode::IndY),
+
+            0x49 => self.eor(AddrMode::Imm),
+            0x45 => self.eor(AddrMode::Zpg),
+            0x55 => self.eor(AddrMode::ZpgX),
+            0x4D => self.eor(AddrMode::Abs),
+            0x5D => self.eor(AddrMode::AbsX),
+            0x59 => self.eor(AddrMode::AbsY),
+            0x41 => self.eor(AddrMode::IndX),
+            0x51 => self.eor(AddrMode::IndY),
+
+            0x09 => self.ora(AddrMode::Imm),
+            0x05 => self.ora(AddrMode::Zpg),
+            0x15 => self.ora(AddrMode::ZpgX),
+            0x0D => self.ora(AddrMode::Abs),
+            0x1D => self.ora(AddrMode::AbsX),
+            0x19 => self.ora(AddrMode::AbsY),
+            0x01 => self.ora(AddrMode::IndX),
+            0x11 => self.ora(AddrMode::IndY),
+
+            // ...
+
+            0x69 => self.adc(AddrMode::Imm),
+            0x65 => self.adc(AddrMode::Zpg),
+            0x75 => self.adc(AddrMode::ZpgX),
+            0x6D => self.adc(AddrMode::Abs),
+            0x7D => self.adc(AddrMode::AbsX),
+            0x79 => self.adc(AddrMode::AbsY),
+            0x61 => self.adc(AddrMode::IndX),
+            0x71 => self.adc(AddrMode::IndY),
+
+            // ...
+
+            0xE6 => self.inc(AddrMode::Zpg),
+            0xF6 => self.inc(AddrMode::ZpgX),
+            0xEE => self.inc(AddrMode::Abs),
+            0xFE => self.inc(AddrMode::AbsX),
+
+            0xE8 => self.inx(),
+
+            0xC8 => self.iny(),
+
+            0xC6 => self.dec(AddrMode::Zpg),
+            0xD6 => self.dec(AddrMode::ZpgX),
+            0xCE => self.dec(AddrMode::Abs),
+            0xDE => self.dec(AddrMode::AbsX),
+
+            0xCA => self.dex(),
+
+            0x88 => self.dey(),
+            
             _ => panic!("Unknown instruction: {:#04X} at {:#06X}", opcode, self.pc - 1),
         }
     }
@@ -256,6 +304,11 @@ impl Cpu {
     fn unset_flag(&mut self, flag: StatusFlag) {
         let flag_repr: u8 = flag.into();
         self.status &= !flag_repr
+    }
+
+    fn test_flag(&mut self, flag: StatusFlag) -> bool {
+        let flag_repr: u8 = flag.into();
+        self.status & flag_repr != 0
     }
 
     fn update_nz(&mut self, value: u8) {
@@ -273,30 +326,30 @@ impl Cpu {
     }
 
     fn lda(&mut self, mode: AddrMode) {
-        self.a = self.addr_mode_read(mode);
+        self.a = self.addr_read(mode);
         self.update_nz(self.a);
     }
 
     fn ldx(&mut self, mode: AddrMode) {
-        self.x = self.addr_mode_read(mode);
+        self.x = self.addr_read(mode);
         self.update_nz(self.x);
     }
     
     fn ldy(&mut self, mode: AddrMode) {
-        self.y = self.addr_mode_read(mode);
+        self.y = self.addr_read(mode);
         self.update_nz(self.y);
     }
 
     fn sta(&mut self, mode: AddrMode) {
-        self.addr_mode_write(mode, self.a)
+        self.addr_write(mode, self.a)
     }
 
     fn stx(&mut self, mode: AddrMode) {
-        self.addr_mode_write(mode, self.x)
+        self.addr_write(mode, self.x)
     }
 
     fn sty(&mut self, mode: AddrMode) {
-        self.addr_mode_write(mode, self.y)
+        self.addr_write(mode, self.y)
     }
 
     fn tax(&mut self) {
@@ -346,18 +399,69 @@ impl Cpu {
     }
 
     fn and(&mut self, mode: AddrMode) {
-        self.a &= self.addr_mode_read(mode);
+        self.a &= self.addr_read(mode);
         self.update_nz(self.a);
     }
 
     fn eor(&mut self, mode: AddrMode) {
-        self.a ^= self.addr_mode_read(mode);
+        self.a ^= self.addr_read(mode);
         self.update_nz(self.a);
     }
 
     fn ora(&mut self, mode: AddrMode) {
-        self.a |= self.addr_mode_read(mode);
+        self.a |= self.addr_read(mode);
         self.update_nz(self.a);
+    }
+
+    // TODO bit()
+
+    fn adc(&mut self, mode: AddrMode) {
+        let m = self.addr_read(mode) + (self.status & 1);
+
+        self.a = self.a.wrapping_add(m);
+        self.update_nz(self.a);
+
+        todo!()
+    }
+
+    // TODO: rest of arithmetic
+    
+    // TODO: m is not accurate cuz its the new m
+
+    fn inc(&mut self, mode: AddrMode) {
+        let addr = self.addr(mode);
+        let m = self.mem_read(addr).wrapping_add(1);
+
+        self.mem_write(addr, m);
+        self.update_nz(m);
+    }
+
+    fn inx(&mut self) {
+        self.x = self.x.wrapping_add(1);
+        self.update_nz(self.x);
+    }
+
+    fn iny(&mut self) {
+        self.y = self.y.wrapping_add(1);
+        self.update_nz(self.y);
+    }
+
+    fn dec(&mut self, mode: AddrMode) {
+        let addr = self.addr(mode);
+        let m = self.mem_read(addr).wrapping_sub(1);
+
+        self.mem_write(addr, m);
+        self.update_nz(m);
+    }
+
+    fn dex(&mut self) {
+        self.x = self.x.wrapping_add(1);
+        self.update_nz(self.x);
+    }
+    
+    fn dey(&mut self) {
+        self.y = self.y.wrapping_sub(1);
+        self.update_nz(self.y);
     }
 }
 
@@ -377,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn test_addr_mode_read() {
+    fn test_addr_read() {
         let mut cpu = Cpu::new();
 
         // Immediate
@@ -427,6 +531,10 @@ mod tests {
 
         cpu.set_flag(StatusFlag::Negative);
         assert_eq!(cpu.status, 0b01001001);
+
+        assert_eq!(cpu.test_flag(StatusFlag::BreakCommand), false);
+
+        assert_eq!(cpu.test_flag(StatusFlag::Negative), true);
 
         cpu.unset_flag(StatusFlag::Negative);
         assert_eq!(cpu.status, 0b00001001);
