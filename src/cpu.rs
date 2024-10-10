@@ -1,6 +1,11 @@
+#![feature(generic_arg_infer)]
+
+use std::{fs::OpenOptions, iter::Cycle, ops::Add};
+
 const STACK_ADDR: u16 = 0x0100;
 
 enum AddrMode {
+    Impl,
     Imm,
     Zpg,
     ZpgX,
@@ -15,30 +20,109 @@ enum AddrMode {
     Acc,
 }
 
+#[repr(u8)]
 enum StatusFlag {
-    Carry,
-    Zero,
-    InterruptDisable,
-    Decimal,
-    BreakCommand,
-    Overflow,
-    Negative,
+    Carry = 0b00000001,
+    Zero = 0b00000010,
+    InterruptDisable = 0b00000100,
+    Decimal = 0b00001000,
+    BreakCommand = 0b00010000,
+    Overflow = 0b00100000,
+    Negative = 0b01000000,
 }
 
-impl Into<u8> for StatusFlag {
-    fn into(self) -> u8 {
-        match self {
-            StatusFlag::Carry => 0b00000001,
-            StatusFlag::Zero => 0b00000010,
-            StatusFlag::InterruptDisable => 0b00000100,
-            StatusFlag::Decimal => 0b00001000,
-            StatusFlag::BreakCommand => 0b00010000,
-            StatusFlag::Overflow => 0b00100000,
-            StatusFlag::Negative => 0b01000000,
-        }
-    }
+enum Instruction {
+    ADC,
+    AND,
+    ASL,
+    BCC,
+    BCS,
+    BEQ,
+    BIT,
+    BMI,
+    BNE,
+    BPL,
+    BRK,
+    BVC,
+    BVS,
+    CLC,
+    CLD,
+    CLI,
+    CLV,
+    CMP,
+    CPX,
+    CPY,
+    DEC,
+    DEX,
+    DEY,
+    EOR,
+    INC,
+    INX,
+    INY,
+    JMP,
+    JSR,
+    LDA,
+    LDX,
+    LDY,
+    LSR,
+    NOP,
+    ORA,
+    PHA,
+    PHP,
+    PLA,
+    PLP,
+    ROL,
+    ROR,
+    RTI,
+    RTS,
+    SBC,
+    SEC,
+    SED,
+    SEI,
+    STA,
+    STX,
+    STY,
+    TAX,
+    TAY,
+    TSX,
+    TXA,
+    TXS,
+    TYA,
 }
 
+struct Op(Instruction, AddrMode, fn(&mut Cpu, u16), u8);
+
+fn brk(cpu: &mut Cpu, addr: u16) {
+    cpu.stack_push_u16(cpu.pc);
+    cpu.stack_push(cpu.status);
+
+    cpu.set_flag(StatusFlag::BreakCommand);
+}
+
+fn lda(cpu: &mut Cpu, addr: u16) {
+    cpu.a = cpu.mem_read(addr);
+    cpu.update_nz(cpu.a);
+}
+
+const OPCODES: [Option<Op>; _] = [
+    Some(Op(Instruction::BRK, AddrMode::Impl, brk, 7)),
+    None,
+    None,
+    None,
+    None,
+    Some(Op(Instruction::BRK, AddrMode::Zpg, brk, 3)),
+    Some(Op(Instruction::ASL, AddrMode::Zpg, brk, 5)),
+    None,
+    Some(OpCode::new("PHP", brk, AddrMode::Impl, 1, 3)),
+    Some(OpCode::new("ORA", brk, AddrMode::Imm, 2, 2)),
+    Some(OpCode::new("ASL", brk, AddrMode::Acc, 1, 2)),
+    None,
+    None,
+    Some(OpCode::new("ORA", brk, AddrMode::Abs, 3, 2)),
+    Some(OpCode::new("ASL", brk, AddrMode::Acc, 1, 2)),
+];
+
+#[derive(Debug)]
 pub struct Cpu {
     pub a: u8,
     pub x: u8,
@@ -72,12 +156,12 @@ impl Cpu {
         self.pc = self.mem_read_u16(0xFFFC);
     }
 
-    fn load(&mut self, program: Vec<u8>) {
-        self.memory[0x8000 .. (0x8000 + program.len())].copy_from_slice(&program[..]);
+    pub fn load(&mut self, program: Vec<u8>) {
+        self.memory[0x8000..(0x8000 + program.len())].copy_from_slice(&program[..]);
         self.mem_write_u16(0xFFFC, 0x8000)
     }
-    
-    fn load_and_run(&mut self, program: Vec<u8>) {
+
+    pub fn load_and_run(&mut self, program: Vec<u8>) {
         self.load(program);
         self.reset();
 
@@ -91,7 +175,7 @@ impl Cpu {
     fn mem_read_u16(&mut self, addr: u16) -> u16 {
         let low = self.mem_read(addr) as u16;
         let high = self.mem_read(addr + 1) as u16;
-        
+
         (high << 8) | low
     }
 
@@ -127,29 +211,39 @@ impl Cpu {
         self.s = self.s.wrapping_sub(1);
     }
 
+    fn stack_push_u16(&mut self, data: u16) {
+        let high = (data >> 8) as u8;
+        let low = (data & 0xFF) as u8;
+
+        self.stack_push(low);
+        self.stack_push(high);
+    }
+
     fn stack_pull(&mut self) -> u8 {
         self.s = self.s.wrapping_add(1);
         self.mem_read(STACK_ADDR + self.s as u16)
     }
 
+    fn stack_pull_u16(&mut self) -> u16 {
+        let high = self.stack_pull() as u16;
+        let low = self.stack_pull() as u16;
+
+        (high << 8) | low
+    }
+
     fn addr(&mut self, mode: AddrMode) -> u16 {
         match mode {
             AddrMode::Imm => self.pc,
-            AddrMode::Zpg => {
-                self.read() as u16
-            },
+            AddrMode::Zpg => self.read() as u16,
             AddrMode::ZpgX => {
                 let base = self.read() as u16;
                 base.wrapping_add(self.x as u16)
-            },
+            }
             AddrMode::ZpgY => {
                 let base = self.read() as u16;
                 base.wrapping_add(self.y as u16)
-            },
-            AddrMode::Abs => {
-                self.read_u16()
-
             }
+            AddrMode::Abs => self.read_u16(),
             AddrMode::AbsX => {
                 let base = self.read_u16();
                 base.wrapping_add(self.x as u16)
@@ -158,6 +252,16 @@ impl Cpu {
                 let base = self.read_u16();
                 base.wrapping_add(self.x as u16)
             }
+            AddrMode::Ind => {
+                let base = self.read_u16();
+                self.mem_read_u16(base)
+            }
+            AddrMode::IndX => {
+                let base = self.read_u16();
+                self.mem_read_u16(base)
+            }
+            // AddrMode::IndY => {
+            // }
             _ => panic!("Not implemented"),
         }
     }
@@ -196,7 +300,7 @@ impl Cpu {
             0xB4 => self.ldy(AddrMode::ZpgX),
             0xAC => self.ldy(AddrMode::Abs),
             0xBC => self.ldy(AddrMode::AbsX),
-            
+
             0x85 => self.sta(AddrMode::Zpg),
             0x95 => self.sta(AddrMode::ZpgX),
             0x8D => self.sta(AddrMode::Abs),
@@ -273,7 +377,6 @@ impl Cpu {
             0x71 => self.adc(AddrMode::IndY),
 
             // ...
-
             0xE6 => self.inc(AddrMode::Zpg),
             0xF6 => self.inc(AddrMode::ZpgX),
             0xEE => self.inc(AddrMode::Abs),
@@ -291,35 +394,41 @@ impl Cpu {
             0xCA => self.dex(),
 
             0x88 => self.dey(),
-            
-            _ => panic!("Unknown instruction: {:#04X} at {:#06X}", opcode, self.pc - 1),
+
+            0xEA => (), // NOP
+
+            _ => panic!(
+                "Unknown instruction: {:#04X} at {:#06X}",
+                opcode,
+                self.pc - 1
+            ),
         }
     }
 
     fn set_flag(&mut self, flag: StatusFlag) {
-        let flag_repr: u8 = flag.into();
+        let flag_repr: u8 = flag as u8;
         self.status |= flag_repr
     }
 
     fn clear_flag(&mut self, flag: StatusFlag) {
-        let flag_repr: u8 = flag.into();
+        let flag_repr: u8 = flag as u8;
         self.status &= !flag_repr
     }
 
     fn test_flag(&mut self, flag: StatusFlag) -> bool {
-        let flag_repr: u8 = flag.into();
+        let flag_repr: u8 = flag as u8;
         self.status & flag_repr != 0
     }
 
     fn update_nz(&mut self, value: u8) {
         if value == 0 {
-            self.set_flag(StatusFlag::Zero)  
+            self.set_flag(StatusFlag::Zero)
         } else {
             self.clear_flag(StatusFlag::Zero)
         }
 
         if value & 0x80 != 0 {
-            self.set_flag(StatusFlag::Negative)  
+            self.set_flag(StatusFlag::Negative)
         } else {
             self.clear_flag(StatusFlag::Negative)
         }
@@ -334,7 +443,7 @@ impl Cpu {
         self.x = self.addr_read(mode);
         self.update_nz(self.x);
     }
-    
+
     fn ldy(&mut self, mode: AddrMode) {
         self.y = self.addr_read(mode);
         self.update_nz(self.y);
@@ -423,13 +532,13 @@ impl Cpu {
             self.clear_flag(StatusFlag::Zero);
         }
 
-        if m & 0x40 != 0 {
+        if m & 0b01000000 != 0 {
             self.set_flag(StatusFlag::Overflow)
         } else {
             self.clear_flag(StatusFlag::Overflow)
         }
 
-        if m & 0x80 != 0 {
+        if m & 0b10000000 != 0 {
             self.set_flag(StatusFlag::Negative)
         } else {
             self.clear_flag(StatusFlag::Negative)
@@ -437,32 +546,74 @@ impl Cpu {
     }
 
     // Should be tested
-    fn adc(&mut self, mode: AddrMode) {
-        let m = self.addr_read(mode);
+    fn adc_inner(&mut self, m: u8) {
+        let s = self.a as i32 + m as i32 + (self.status & 1) as i32;
 
-        let s = self.a.wrapping_add(m.wrapping_add(self.status & 1));
-
-        if m > 0xFF - self.a - (self.status & 1)  {
+        // Suspicious
+        if s > 0xFF {
             self.set_flag(StatusFlag::Carry);
         } else {
             self.clear_flag(StatusFlag::Carry);
         }
 
         // https://forums.nesdev.org/viewtopic.php?t=6331
-        if (self.a ^ s) & (m & s) & 0x80 != 0 {
+        if (self.a as i32 ^ s) & (m as i32 ^ s) & 0x80 != 0 {
             self.set_flag(StatusFlag::Overflow);
         } else {
             self.clear_flag(StatusFlag::Overflow);
         }
 
-        self.a = self.a.wrapping_add(m);
+        // Humm
+        self.a = s as u8;
 
         self.update_nz(self.a);
     }
 
-    // TODO: rest of arithmetic
-    
-    // TODO: m is not accurate cuz its the new m
+    fn adc(&mut self, mode: AddrMode) {
+        let m = self.addr_read(mode);
+        self.adc_inner(m);
+    }
+
+    fn sbc(&mut self, mode: AddrMode) {
+        let m = self.addr_read(mode);
+        self.adc_inner(!m);
+    }
+
+    fn cmp(&mut self, mode: AddrMode) {
+        let m = self.addr_read(mode);
+
+        let val = self.a.wrapping_sub(m);
+
+        if self.a >= m {
+            self.set_flag(StatusFlag::Carry);
+        }
+
+        self.update_nz(val);
+    }
+
+    fn cmx(&mut self, mode: AddrMode) {
+        let m = self.addr_read(mode);
+
+        let val = self.x.wrapping_sub(m);
+
+        if self.x >= m {
+            self.set_flag(StatusFlag::Carry);
+        }
+
+        self.update_nz(val);
+    }
+
+    fn cmy(&mut self, mode: AddrMode) {
+        let m = self.addr_read(mode);
+
+        let val = self.y.wrapping_sub(m);
+
+        if self.y >= m {
+            self.set_flag(StatusFlag::Carry);
+        }
+
+        self.update_nz(val);
+    }
 
     fn inc(&mut self, mode: AddrMode) {
         let addr = self.addr(mode);
@@ -494,10 +645,106 @@ impl Cpu {
         self.x = self.x.wrapping_add(1);
         self.update_nz(self.x);
     }
-    
+
     fn dey(&mut self) {
         self.y = self.y.wrapping_sub(1);
         self.update_nz(self.y);
+    }
+
+    fn asl(&mut self) {}
+
+    fn jmp(&mut self, mode: AddrMode) {
+        let addr = self.addr(mode);
+        self.pc = addr;
+    }
+
+    fn jsr(&mut self, mode: AddrMode) {
+        let addr = self.addr(mode);
+
+        self.stack_push_u16(self.pc.wrapping_sub(1));
+        self.pc = addr;
+    }
+
+    fn rts(&mut self) {
+        self.pc = self.stack_pull_u16();
+    }
+
+    // Branches
+
+    fn bcc(&mut self, mode: AddrMode) {
+        let offset: i8 = todo!();
+
+        if !self.test_flag(StatusFlag::Carry) {
+            if offset > 0 {
+                self.pc = self.pc.wrapping_add(offset as u16)
+            } else {
+                self.pc = self.pc.wrapping_sub((-offset) as u16)
+            }
+        }
+    }
+
+    fn bcs(&mut self, mode: AddrMode) {
+        let offset: i8 = todo!();
+
+        if self.test_flag(StatusFlag::Carry) {
+            if offset > 0 {
+                self.pc = self.pc.wrapping_add(offset as u16)
+            } else {
+                self.pc = self.pc.wrapping_sub((-offset) as u16)
+            }
+        }
+    }
+
+    fn beq(&mut self, mode: AddrMode) {
+        let offset: i8 = todo!();
+
+        if self.test_flag(StatusFlag::Zero) {
+            if offset > 0 {
+                self.pc = self.pc.wrapping_add(offset as u16)
+            } else {
+                self.pc = self.pc.wrapping_sub((-offset) as u16)
+            }
+        }
+    }
+
+    fn clc(&mut self) {
+        self.clear_flag(StatusFlag::Carry);
+    }
+
+    fn cld(&mut self) {
+        self.clear_flag(StatusFlag::Decimal);
+    }
+
+    fn cli(&mut self) {
+        self.clear_flag(StatusFlag::InterruptDisable);
+    }
+
+    fn clv(&mut self) {
+        self.clear_flag(StatusFlag::Overflow);
+    }
+
+    fn sec(&mut self) {
+        self.set_flag(StatusFlag::Carry);
+    }
+
+    fn sed(&mut self) {
+        self.set_flag(StatusFlag::Decimal);
+    }
+
+    fn sei(&mut self) {
+        self.set_flag(StatusFlag::InterruptDisable);
+    }
+
+    fn brk(&mut self) {
+        self.stack_push_u16(self.pc);
+        self.stack_push(self.status);
+
+        self.set_flag(StatusFlag::BreakCommand);
+    }
+
+    fn rti(&mut self) {
+        self.status = self.stack_pull();
+        self.pc = self.stack_pull_u16();
     }
 }
 
