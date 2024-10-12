@@ -25,8 +25,8 @@ enum StatusFlag {
     InterruptDisable = 0b00000100,
     Decimal = 0b00001000,
     BreakCommand = 0b00010000,
-    Overflow = 0b00100000,
-    Negative = 0b01000000,
+    Overflow = 0b01000000,
+    Negative = 0b10000000,
 }
 
 pub struct Cpu {
@@ -160,7 +160,7 @@ impl Cpu {
                 let base = self.read_u16();
                 let deref = self.bus.mem_read_u16(base);
                 deref.wrapping_add(self.y as u16)
-            },
+            }
             AddrMode::Rel => {
                 let offset = self.read() as u8;
                 let abs_offset = offset & 0b01111111;
@@ -334,6 +334,14 @@ impl Cpu {
 
             0xD0 => self.bne(AddrMode::Rel),
 
+            0x30 => self.bmi(AddrMode::Rel),
+
+            0x10 => self.bpl(AddrMode::Rel),
+
+            0x50 => self.bvc(AddrMode::Rel),
+
+            0x70 => self.bvs(AddrMode::Rel),
+
             // Status flag changes
             0x18 => self.clc(),
 
@@ -364,12 +372,12 @@ impl Cpu {
 
     fn set_flag(&mut self, flag: StatusFlag) {
         let flag_repr: u8 = flag as u8;
-        self.status |= flag_repr
+        self.status |= flag_repr;
     }
 
     fn clear_flag(&mut self, flag: StatusFlag) {
         let flag_repr: u8 = flag as u8;
-        self.status &= !flag_repr
+        self.status &= !flag_repr;
     }
 
     fn test_flag(&mut self, flag: StatusFlag) -> bool {
@@ -384,7 +392,7 @@ impl Cpu {
             self.clear_flag(StatusFlag::Zero)
         }
 
-        if value & 0x80 != 0 {
+        if value & 0b10000000 != 0 {
             self.set_flag(StatusFlag::Negative)
         } else {
             self.clear_flag(StatusFlag::Negative)
@@ -660,6 +668,38 @@ impl Cpu {
         }
     }
 
+    fn bmi(&mut self, mode: AddrMode) {
+        let addr = self.read_addr(mode);
+
+        if self.test_flag(StatusFlag::Negative) {
+            self.pc = addr;
+        }
+    }
+
+    fn bpl(&mut self, mode: AddrMode) {
+        let addr = self.read_addr(mode);
+
+        if !self.test_flag(StatusFlag::Negative) {
+            self.pc = addr;
+        }
+    }
+
+    fn bvs(&mut self, mode: AddrMode) {
+        let addr = self.read_addr(mode);
+
+        if self.test_flag(StatusFlag::Overflow) {
+            self.pc = addr;
+        }
+    }
+
+    fn bvc(&mut self, mode: AddrMode) {
+        let addr = self.read_addr(mode);
+
+        if !self.test_flag(StatusFlag::Overflow) {
+            self.pc = addr;
+        }
+    }
+
     fn clc(&mut self) {
         self.clear_flag(StatusFlag::Carry);
     }
@@ -743,7 +783,7 @@ mod tests {
         });
 
         for (i, test) in testcases.enumerate() {
-            assert_eq!(test, cpu.exec());
+            assert_eq!(cpu.exec(), test);
             eprintln!("{} {:#X} {:?} ✅", i + 1, test.0, test.1);
         }
     }
