@@ -298,6 +298,15 @@ impl Cpu {
             0x61 => self.adc(AddrMode::IndX),
             0x71 => self.adc(AddrMode::IndY),
 
+            0xC9 => self.cmp(AddrMode::Imm),
+            0xC5 => self.cmp(AddrMode::Zpg),
+            0xD5 => self.cmp(AddrMode::ZpgX),
+            0xCD => self.cmp(AddrMode::Abs),
+            0xDD => self.cmp(AddrMode::AbsX),
+            0xD9 => self.cmp(AddrMode::AbsY),
+            0xC1 => self.cmp(AddrMode::IndX),
+            0xD1 => self.cmp(AddrMode::IndY),
+
             // ...
             0xE6 => self.inc(AddrMode::Zpg),
             0xF6 => self.inc(AddrMode::ZpgX),
@@ -324,6 +333,8 @@ impl Cpu {
             0x6C => self.jmp(AddrMode::Ind),
 
             0x20 => self.jsr(AddrMode::Abs),
+
+            0x60 => self.rts(),
 
             // Branches
             0x90 => self.bcc(AddrMode::Rel),
@@ -460,7 +471,7 @@ impl Cpu {
     }
 
     fn php(&mut self) {
-        self.stack_push(self.status);
+        self.stack_push(self.status | StatusFlag::BreakCommand as u8);
     }
 
     fn pla(&mut self) {
@@ -469,7 +480,7 @@ impl Cpu {
     }
 
     fn plp(&mut self) {
-        self.status = self.stack_pull();
+        self.status = 0x20 | (self.stack_pull() & 0xEF);
     }
 
     fn and(&mut self, mode: AddrMode) {
@@ -626,7 +637,7 @@ impl Cpu {
     fn jsr(&mut self, mode: AddrMode) {
         let addr = self.read_addr(mode);
 
-        self.stack_push_u16(self.pc.wrapping_sub(1));
+        self.stack_push_u16(self.pc);
         self.pc = addr;
     }
 
@@ -784,7 +795,7 @@ mod tests {
 
         for (i, test) in testcases.enumerate() {
             assert_eq!(cpu.exec(), test);
-            eprintln!("{} {:#X} {:?} ✅", i + 1, test.0, test.1);
+            eprintln!("nestest.log:{} {:#X} {:?} ✅", i + 1, test.0, test.1);
         }
     }
 }
