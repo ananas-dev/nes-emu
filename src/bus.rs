@@ -57,7 +57,7 @@ impl Bus {
 
     pub fn mem_read_u16(&mut self, addr: u16) -> u16 {
         let low = self.mem_read(addr) as u16;
-        let high = self.mem_read(addr + 1) as u16;
+        let high = self.mem_read(addr.wrapping_add(1)) as u16;
 
         (high << 8) | low
     }
@@ -67,7 +67,7 @@ impl Bus {
         let low = (data & 0xFF) as u8;
 
         self.mem_write(addr, low);
-        self.mem_write(addr + 1, high)
+        self.mem_write(addr.wrapping_add(1), high)
     }
 
     fn read_prg_rom(&self, mut addr: u16) -> u8 {

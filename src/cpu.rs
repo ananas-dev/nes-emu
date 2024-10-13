@@ -133,12 +133,12 @@ impl Cpu {
             }
             AddrMode::Zpg => self.read() as u16,
             AddrMode::ZpgX => {
-                let base = self.read() as u16;
-                base.wrapping_add(self.x as u16)
+                let base = self.read();
+                base.wrapping_add(self.x) as u16
             }
             AddrMode::ZpgY => {
-                let base = self.read() as u16;
-                base.wrapping_add(self.y as u16)
+                let base = self.read();
+                base.wrapping_add(self.y) as u16
             }
             AddrMode::Abs => self.read_u16(),
             AddrMode::AbsX => {
@@ -147,21 +147,39 @@ impl Cpu {
             }
             AddrMode::AbsY => {
                 let base = self.read_u16();
-                base.wrapping_add(self.x as u16)
+                base.wrapping_add(self.y as u16)
             }
             AddrMode::Ind => {
                 let base = self.read_u16();
-                self.bus.mem_read_u16(base)
+                self.bus.mem_read_u16(base);
+
+                let hi = (base >> 8) as u8;
+                let lo = (base & 0xFF) as u8;
+
+                let new_lo = self.bus.mem_read((hi as u16) << 8 | (lo as u16));
+                let new_hi = self
+                    .bus
+                    .mem_read((hi as u16) << 8 | (lo.wrapping_add(1) as u16));
+
+                (new_hi as u16) << 8 | (new_lo as u16)
             }
             AddrMode::IndX => {
                 let base = self.read();
-                let ptr = base.wrapping_add(self.x) as u16;
-                self.bus.mem_read_u16(ptr)
+                let ptr: u8 = base.wrapping_add(self.x);
+
+                let lo = self.bus.mem_read(ptr as u16);
+                let hi = self.bus.mem_read(ptr.wrapping_add(1) as u16);
+                (hi as u16) << 8 | (lo as u16)
             }
             AddrMode::IndY => {
                 let base = self.read();
-                let deref = self.bus.mem_read_u16(base as u16);
-                deref.wrapping_add(self.y as u16)
+
+                let lo = self.bus.mem_read(base as u16);
+                let hi = self.bus.mem_read(base.wrapping_add(1) as u16);
+                let deref_base = (hi as u16) << 8 | (lo as u16);
+                let deref = deref_base.wrapping_add(self.y as u16);
+
+                deref
             }
             AddrMode::Rel => {
                 let offset = self.read() as u8;
@@ -346,7 +364,6 @@ impl Cpu {
             0x88 => self.dey(),
 
             // TODO: Shifts
-
             0x0A => self.asl(AddrMode::Acc),
             0x06 => self.asl(AddrMode::Zpg),
             0x16 => self.asl(AddrMode::ZpgX),
@@ -415,6 +432,17 @@ impl Cpu {
             0xEA => (), // NOP
 
             0x40 => self.rti(),
+
+            // Unofficial
+            0x04 | 0x44 | 0x64 | 0x14 | 0x34 | 0x54 | 0x74 | 0xD4 | 0xF4 | 0x80 => {
+                self.read();
+            }
+
+            0x0C | 0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => {
+                self.read_u16();
+            }
+
+            0x1A | 0x3A | 0x5A | 0x7A | 0xDA | 0xFA => (),
 
             _ => panic!(
                 "Unknown instruction: {:#04X} at {:#06X}",
@@ -706,7 +734,6 @@ impl Cpu {
                 self.update_nz(m);
             }
         }
-
     }
 
     fn lsr(&mut self, mode: AddrMode) {
