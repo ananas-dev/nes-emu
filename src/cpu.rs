@@ -1,3 +1,5 @@
+use std::ops::Add;
+
 use crate::bus::Bus;
 
 const STACK_ADDR: u16 = 0x0100;
@@ -106,8 +108,8 @@ impl Cpu {
         let high = (data >> 8) as u8;
         let low = (data & 0xFF) as u8;
 
-        self.stack_push(low);
         self.stack_push(high);
+        self.stack_push(low);
     }
 
     fn stack_pull(&mut self) -> u8 {
@@ -116,8 +118,8 @@ impl Cpu {
     }
 
     fn stack_pull_u16(&mut self) -> u16 {
-        let high = self.stack_pull() as u16;
         let low = self.stack_pull() as u16;
+        let high = self.stack_pull() as u16;
 
         (high << 8) | low
     }
@@ -152,13 +154,13 @@ impl Cpu {
                 self.bus.mem_read_u16(base)
             }
             AddrMode::IndX => {
-                let base = self.read_u16();
-                let deref = self.bus.mem_read_u16(base);
-                deref.wrapping_add(self.x as u16)
+                let base = self.read();
+                let ptr = base.wrapping_add(self.x) as u16;
+                self.bus.mem_read_u16(ptr)
             }
             AddrMode::IndY => {
-                let base = self.read_u16();
-                let deref = self.bus.mem_read_u16(base);
+                let base = self.read();
+                let deref = self.bus.mem_read_u16(base as u16);
                 deref.wrapping_add(self.y as u16)
             }
             AddrMode::Rel => {
@@ -298,6 +300,15 @@ impl Cpu {
             0x61 => self.adc(AddrMode::IndX),
             0x71 => self.adc(AddrMode::IndY),
 
+            0xE9 => self.sbc(AddrMode::Imm),
+            0xE5 => self.sbc(AddrMode::Zpg),
+            0xF5 => self.sbc(AddrMode::ZpgX),
+            0xED => self.sbc(AddrMode::Abs),
+            0xFD => self.sbc(AddrMode::AbsX),
+            0xF9 => self.sbc(AddrMode::AbsY),
+            0xE1 => self.sbc(AddrMode::IndX),
+            0xF1 => self.sbc(AddrMode::IndY),
+
             0xC9 => self.cmp(AddrMode::Imm),
             0xC5 => self.cmp(AddrMode::Zpg),
             0xD5 => self.cmp(AddrMode::ZpgX),
@@ -306,6 +317,14 @@ impl Cpu {
             0xD9 => self.cmp(AddrMode::AbsY),
             0xC1 => self.cmp(AddrMode::IndX),
             0xD1 => self.cmp(AddrMode::IndY),
+
+            0xE0 => self.cpx(AddrMode::Imm),
+            0xE4 => self.cpx(AddrMode::Zpg),
+            0xEC => self.cpx(AddrMode::Abs),
+
+            0xC0 => self.cpy(AddrMode::Imm),
+            0xC4 => self.cpy(AddrMode::Zpg),
+            0xCC => self.cpy(AddrMode::Abs),
 
             // ...
             0xE6 => self.inc(AddrMode::Zpg),
@@ -327,6 +346,30 @@ impl Cpu {
             0x88 => self.dey(),
 
             // TODO: Shifts
+
+            0x0A => self.asl(AddrMode::Acc),
+            0x06 => self.asl(AddrMode::Zpg),
+            0x16 => self.asl(AddrMode::ZpgX),
+            0x0E => self.asl(AddrMode::Abs),
+            0x1E => self.asl(AddrMode::AbsX),
+
+            0x4A => self.lsr(AddrMode::Acc),
+            0x46 => self.lsr(AddrMode::Zpg),
+            0x56 => self.lsr(AddrMode::ZpgX),
+            0x4E => self.lsr(AddrMode::Abs),
+            0x5E => self.lsr(AddrMode::AbsX),
+
+            0x2A => self.rol(AddrMode::Acc),
+            0x26 => self.rol(AddrMode::Zpg),
+            0x36 => self.rol(AddrMode::ZpgX),
+            0x2E => self.rol(AddrMode::Abs),
+            0x3E => self.rol(AddrMode::AbsX),
+
+            0x6A => self.ror(AddrMode::Acc),
+            0x66 => self.ror(AddrMode::Zpg),
+            0x76 => self.ror(AddrMode::ZpgX),
+            0x6E => self.ror(AddrMode::Abs),
+            0x7E => self.ror(AddrMode::AbsX),
 
             // Jump and calls
             0x4C => self.jmp(AddrMode::Abs),
@@ -370,6 +413,8 @@ impl Cpu {
 
             // System functions
             0xEA => (), // NOP
+
+            0x40 => self.rti(),
 
             _ => panic!(
                 "Unknown instruction: {:#04X} at {:#06X}",
@@ -562,30 +607,36 @@ impl Cpu {
 
         if self.a >= m {
             self.set_flag(StatusFlag::Carry);
+        } else {
+            self.clear_flag(StatusFlag::Carry);
         }
 
         self.update_nz(val);
     }
 
-    fn cmx(&mut self, mode: AddrMode) {
+    fn cpx(&mut self, mode: AddrMode) {
         let m = self.addr_read(mode);
 
         let val = self.x.wrapping_sub(m);
 
         if self.x >= m {
             self.set_flag(StatusFlag::Carry);
+        } else {
+            self.clear_flag(StatusFlag::Carry);
         }
 
         self.update_nz(val);
     }
 
-    fn cmy(&mut self, mode: AddrMode) {
+    fn cpy(&mut self, mode: AddrMode) {
         let m = self.addr_read(mode);
 
         let val = self.y.wrapping_sub(m);
 
         if self.y >= m {
             self.set_flag(StatusFlag::Carry);
+        } else {
+            self.clear_flag(StatusFlag::Carry);
         }
 
         self.update_nz(val);
@@ -618,7 +669,7 @@ impl Cpu {
     }
 
     fn dex(&mut self) {
-        self.x = self.x.wrapping_add(1);
+        self.x = self.x.wrapping_sub(1);
         self.update_nz(self.x);
     }
 
@@ -627,7 +678,152 @@ impl Cpu {
         self.update_nz(self.y);
     }
 
-    fn asl(&mut self) {}
+    fn asl(&mut self, mode: AddrMode) {
+        match mode {
+            AddrMode::Acc => {
+                if self.a & 0b10000000 != 0 {
+                    self.set_flag(StatusFlag::Carry);
+                } else {
+                    self.clear_flag(StatusFlag::Carry);
+                }
+
+                self.a = self.a << 1;
+                self.update_nz(self.a);
+            }
+            _ => {
+                let addr = self.read_addr(mode);
+                let mut m = self.bus.mem_read(addr);
+
+                if m & 0b10000000 != 0 {
+                    self.set_flag(StatusFlag::Carry);
+                } else {
+                    self.clear_flag(StatusFlag::Carry);
+                }
+
+                m = m << 1;
+
+                self.bus.mem_write(addr, m);
+                self.update_nz(m);
+            }
+        }
+
+    }
+
+    fn lsr(&mut self, mode: AddrMode) {
+        match mode {
+            AddrMode::Acc => {
+                if self.a & 1 != 0 {
+                    self.set_flag(StatusFlag::Carry);
+                } else {
+                    self.clear_flag(StatusFlag::Carry);
+                }
+
+                self.a = self.a >> 1;
+                self.update_nz(self.a);
+            }
+            _ => {
+                let addr = self.read_addr(mode);
+                let mut m = self.bus.mem_read(addr);
+
+                if m & 1 != 0 {
+                    self.set_flag(StatusFlag::Carry);
+                } else {
+                    self.clear_flag(StatusFlag::Carry);
+                }
+
+                m = m >> 1;
+
+                self.bus.mem_write(addr, m);
+                self.update_nz(m);
+            }
+        }
+    }
+
+    fn rol(&mut self, mode: AddrMode) {
+        match mode {
+            AddrMode::Acc => {
+                let old_carry = self.test_flag(StatusFlag::Carry);
+
+                if self.a & 0b10000000 != 0 {
+                    self.set_flag(StatusFlag::Carry);
+                } else {
+                    self.clear_flag(StatusFlag::Carry);
+                }
+
+                self.a = self.a << 1;
+
+                if old_carry {
+                    self.a |= 0b00000001;
+                }
+
+                self.update_nz(self.a);
+            }
+            _ => {
+                let addr = self.read_addr(mode);
+                let mut m = self.bus.mem_read(addr);
+
+                let old_carry = self.test_flag(StatusFlag::Carry);
+
+                if m & 0b10000000 != 0 {
+                    self.set_flag(StatusFlag::Carry);
+                } else {
+                    self.clear_flag(StatusFlag::Carry);
+                }
+
+                m = m << 1;
+
+                if old_carry {
+                    m |= 0b00000001;
+                }
+
+                self.bus.mem_write(addr, m);
+                self.update_nz(m);
+            }
+        }
+    }
+
+    fn ror(&mut self, mode: AddrMode) {
+        match mode {
+            AddrMode::Acc => {
+                let old_carry = self.test_flag(StatusFlag::Carry);
+
+                if self.a & 1 != 0 {
+                    self.set_flag(StatusFlag::Carry);
+                } else {
+                    self.clear_flag(StatusFlag::Carry);
+                }
+
+                self.a = self.a >> 1;
+
+                if old_carry {
+                    self.a |= 0b10000000;
+                }
+
+                self.update_nz(self.a);
+            }
+            _ => {
+                let addr = self.read_addr(mode);
+                let mut m = self.bus.mem_read(addr);
+
+                let old_carry = self.test_flag(StatusFlag::Carry);
+
+                if m & 1 != 0 {
+                    self.set_flag(StatusFlag::Carry);
+                } else {
+                    self.clear_flag(StatusFlag::Carry);
+                }
+
+                m = m >> 1;
+
+                if old_carry {
+                    m |= 0b10000000;
+                }
+
+                self.bus.mem_write(addr, m);
+                self.update_nz(m);
+            }
+        }
+    }
 
     fn jmp(&mut self, mode: AddrMode) {
         let addr = self.read_addr(mode);
@@ -637,12 +833,12 @@ impl Cpu {
     fn jsr(&mut self, mode: AddrMode) {
         let addr = self.read_addr(mode);
 
-        self.stack_push_u16(self.pc);
+        self.stack_push_u16(self.pc.wrapping_sub(1));
         self.pc = addr;
     }
 
     fn rts(&mut self) {
-        self.pc = self.stack_pull_u16();
+        self.pc = self.stack_pull_u16().wrapping_add(1);
     }
 
     // Branches
@@ -747,7 +943,7 @@ impl Cpu {
     }
 
     fn rti(&mut self) {
-        self.status = self.stack_pull();
+        self.status = 0x20 | (self.stack_pull() & 0xEF);
         self.pc = self.stack_pull_u16();
     }
 }
