@@ -1,4 +1,4 @@
-use std::ops::Add;
+use std::io::Read;
 
 use crate::bus::Bus;
 
@@ -20,6 +20,184 @@ enum AddrMode {
     Acc,
 }
 
+impl Cpu {
+    fn read_low(&mut self) {
+    }
+
+    fn read_high(&mut self) {
+    }
+
+    fn read_temp(&mut self) {
+        self.temp = self.bus.mem_read(self.pc);
+        self.pc = self.pc.wrapping_add(1);
+    }
+}
+
+type Instruction = fn(&mut Cpu);
+type ReadInstruction = fn(&mut Cpu, u8); 
+type ReadWriteInstruction = fn(&mut Cpu, u8) -> u8;
+type WriteInstruction = fn(&mut Cpu) -> u8;
+
+fn stack_push(cpu: &mut Cpu, i: Instruction) {
+    match cpu.tick {
+        2 => (), // dummy read
+        3 => i(cpu), 
+        _ => (),
+    }
+}
+
+fn stack_pull_a(cpu: &mut Cpu) {
+    match cpu.tick {
+        2 => (), // dummy read
+        3 => cpu.s = cpu.s.wrapping_add(1), 
+        4 => cpu.bus.mem_write(STACK_ADDR + cpu.s as u16, cpu.a),
+        _ => (),
+    }
+}
+
+fn stack_pull_s(cpu: &mut Cpu) {
+    match cpu.tick {
+        2 => (), // dummy read
+        3 => cpu.s = cpu.s.wrapping_add(1), 
+        4 => cpu.bus.mem_write(STACK_ADDR + cpu.s as u16, cpu.s),
+        _ => (),
+    }
+}
+
+fn abs_adressing_read(cpu: &mut Cpu, i: ReadInstruction) {
+    match cpu.tick {
+        2 => cpu.read_temp(),
+        3 => {
+            let low = cpu.temp;
+            cpu.read_temp();
+            let high = cpu.temp;
+            cpu.bus.address_bus = (high as u16) << 8 |  low as u16
+        },
+        4 => {
+            let data = cpu.bus.mem_read(cpu.bus.address_bus);
+            i(cpu, data)
+        }
+        _ => (),
+    }
+}
+
+fn imm_addressing(cpu: &mut Cpu, i: Instruction) {
+    match cpu.tick {
+        2 => i(cpu),
+        _ => (),
+    }
+}
+
+fn acc_addressing_read_write(cpu: &mut Cpu, i: ReadWriteInstruction) {
+    match cpu.tick {
+        2 => cpu.a = i(cpu, cpu.a),
+        _ => ()
+    }
+}
+
+
+// Read instructions
+
+fn lda(cpu: &mut Cpu, m: u8) {
+    cpu.a = m;
+    cpu.update_nz(cpu.a);
+}
+
+fn ldx(cpu: &mut Cpu, m: u8) {
+    cpu.x = m;
+    cpu.update_nz(cpu.x);
+}
+
+fn ldy(cpu: &mut Cpu, m: u8) {
+    cpu.y = m;
+    cpu.update_nz(cpu.y);
+}
+
+fn and(cpu: &mut Cpu, m: u8) {
+    cpu.a &= m;
+    cpu.update_nz(cpu.a);
+}
+
+fn eor(cpu: &mut Cpu, data: u8) {
+    cpu.a ^= data;
+    cpu.update_nz(cpu.a);
+}
+
+fn ora(cpu: &mut Cpu, data: u8) {
+    cpu.a |= data;
+    cpu.update_nz(cpu.a);
+}
+
+fn adc(cpu: &mut Cpu, m: u8) {
+    let s = cpu.a as i32 + m as i32 + (cpu.status & 1) as i32;
+
+    // Suspicious
+    if s > 0xFF {
+        cpu.set_flag(StatusFlag::Carry);
+    } else {
+        cpu.clear_flag(StatusFlag::Carry);
+    }
+
+    // https://forums.nesdev.org/viewtopic.php?t=6331
+    if (cpu.a as i32 ^ s) & (m as i32 ^ s) & 0x80 != 0 {
+        cpu.set_flag(StatusFlag::Overflow);
+    } else {
+        cpu.clear_flag(StatusFlag::Overflow);
+    }
+
+    // Humm
+    cpu.a = s as u8;
+
+    cpu.update_nz(cpu.a);
+}
+
+fn sbc(cpu: &mut Cpu, m: u8) {
+    adc(cpu, !m);
+}
+
+fn cmp(cpu: &mut Cpu, m: u8) {
+    let val = cpu.a.wrapping_sub(m);
+
+    if cpu.a >= m {
+        cpu.set_flag(StatusFlag::Carry);
+    } else {
+        cpu.clear_flag(StatusFlag::Carry);
+    }
+
+    cpu.update_nz(val);
+}
+
+fn bit(cpu: &mut Cpu, m: u8) {
+    let res = cpu.a & m;
+
+    if res == 0 {
+        cpu.set_flag(StatusFlag::Zero);
+    } else {
+        cpu.clear_flag(StatusFlag::Zero);
+    }
+
+    if m & 0b01000000 != 0 {
+        cpu.set_flag(StatusFlag::Overflow)
+    } else {
+        cpu.clear_flag(StatusFlag::Overflow)
+    }
+
+    if m & 0b10000000 != 0 {
+        cpu.set_flag(StatusFlag::Negative)
+    } else {
+        cpu.clear_flag(StatusFlag::Negative)
+    }
+}
+
+fn lax(cpu: &mut Cpu, m: u8) {
+    lda(cpu, m);
+    todo!()
+    // tax();
+}
+
+fn nop(_cpu: &mut Cpu, _m: u8) {
+}
+
 #[repr(u8)]
 enum StatusFlag {
     Carry = 0b00000001,
@@ -36,10 +214,14 @@ pub struct Cpu {
     pub x: u8,
     pub y: u8,
     pub s: u8,
+    pub temp: u8,
     pub pc: u16,
     pub status: u8,
     pub bus: Bus,
+    pub tick: u8,
 }
+
+pub struct Op((), AddrMode, );
 
 #[derive(Debug, PartialEq)]
 struct RegisterState {
@@ -59,7 +241,9 @@ impl Cpu {
             s: 0,
             pc: 0,
             status: 0,
+            tick: 0,
             bus,
+            temp: 0,
         }
     }
 
@@ -390,6 +574,7 @@ impl Cpu {
             0x7E => self.ror(AddrMode::AbsX),
 
             // Jump and calls
+
             0x4C => self.jmp(AddrMode::Abs),
             0x6C => self.jmp(AddrMode::Ind),
 
@@ -398,6 +583,7 @@ impl Cpu {
             0x60 => self.rts(),
 
             // Branches
+
             0x90 => self.bcc(AddrMode::Rel),
 
             0xB0 => self.bcs(AddrMode::Rel),
