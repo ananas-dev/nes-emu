@@ -31,38 +31,59 @@ impl Cpu {
     }
 }
 
-type Instruction = fn(&mut Cpu);
-type ReadInstruction = fn(&mut Cpu, u8); 
-type ReadWriteInstruction = fn(&mut Cpu, u8) -> u8;
-type WriteInstruction = fn(&mut Cpu) -> u8;
+type InstrFn = fn(&mut Cpu);
+type ReadInstrFn = fn(&mut Cpu, u8); 
+type ReadWriteInstrFn = fn(&mut Cpu, u8) -> u8;
+type WriteInstrFn = fn(&mut Cpu) -> u8;
 
-fn stack_push(cpu: &mut Cpu, i: Instruction) {
+enum Op {
+    StackPush(WriteInstrFn),
+    StackPull(ReadInstrFn),
+    AbsRead(ReadInstrFn),
+    Imm(ReadInstrFn),
+    Acc(InstrFn),
+}
+
+// struct OpCode(Instruction, Operation);
+
+static OPS: Vec<Op> = vec![
+    Op::AbsRead(lda), Op::StackPush(php), Op::Imm(lda)
+];
+
+fn brk(cpu: &mut Cpu) {
+    match cpu.tick {
+        2 => { cpu.read(); }, // dummy read,
+        3 => cpu.s = {
+            cpu.bus.mem_write(STACK_ADDR + cpu.s as u16, i(cpu));
+            cpu.s.wrapping_sub(1)
+        }
+    }
+}
+
+fn stack_push(cpu: &mut Cpu, i: WriteInstrFn) {
     match cpu.tick {
         2 => (), // dummy read
-        3 => i(cpu), 
+        3 => {
+            cpu.bus.mem_write(STACK_ADDR + cpu.s as u16, i(cpu));
+            cpu.s = cpu.s.wrapping_sub(1)
+        }, 
         _ => (),
     }
 }
 
-fn stack_pull_a(cpu: &mut Cpu) {
+fn stack_pull(cpu: &mut Cpu, i: ReadInstrFn) {
     match cpu.tick {
         2 => (), // dummy read
         3 => cpu.s = cpu.s.wrapping_add(1), 
-        4 => cpu.bus.mem_write(STACK_ADDR + cpu.s as u16, cpu.a),
+        4 => {
+            let m = cpu.bus.mem_read(STACK_ADDR + cpu.s as u16);
+            i(cpu, m);
+        },
         _ => (),
     }
 }
 
-fn stack_pull_s(cpu: &mut Cpu) {
-    match cpu.tick {
-        2 => (), // dummy read
-        3 => cpu.s = cpu.s.wrapping_add(1), 
-        4 => cpu.bus.mem_write(STACK_ADDR + cpu.s as u16, cpu.s),
-        _ => (),
-    }
-}
-
-fn abs_adressing_read(cpu: &mut Cpu, i: ReadInstruction) {
+fn abs_adressing_read(cpu: &mut Cpu, i: ReadInstrFn) {
     match cpu.tick {
         2 => cpu.read_temp(),
         3 => {
@@ -79,18 +100,40 @@ fn abs_adressing_read(cpu: &mut Cpu, i: ReadInstruction) {
     }
 }
 
-fn imm_addressing(cpu: &mut Cpu, i: Instruction) {
+fn imm_addressing(cpu: &mut Cpu, i: ReadInstrFn) {
     match cpu.tick {
-        2 => i(cpu),
+        2 => {
+            let m = cpu.read();
+            i(cpu, m)
+        },
         _ => (),
     }
 }
 
-fn acc_addressing_read_write(cpu: &mut Cpu, i: ReadWriteInstruction) {
+fn acc_addressing_read_write(cpu: &mut Cpu, i: ReadWriteInstrFn) {
     match cpu.tick {
         2 => cpu.a = i(cpu, cpu.a),
         _ => ()
     }
+}
+
+// Stack instructions
+
+fn pha(cpu: &mut Cpu) -> u8 {
+    cpu.a
+}
+
+fn php(cpu: &mut Cpu) -> u8 {
+    cpu.status | Flag::BreakCommand as u8
+}
+
+fn pla(cpu: &mut Cpu, m: u8) {
+    cpu.a = m;
+    cpu.update_nz(cpu.a);
+}
+
+fn plp(cpu: &mut Cpu, m: u8) {
+    cpu.status = 0x20 | (m & 0xEF);
 }
 
 
