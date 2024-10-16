@@ -131,16 +131,16 @@ fn adc(cpu: &mut Cpu, m: u8) {
 
     // Suspicious
     if s > 0xFF {
-        cpu.set_flag(StatusFlag::Carry);
+        cpu.set_flag(Flag::Carry);
     } else {
-        cpu.clear_flag(StatusFlag::Carry);
+        cpu.clear_flag(Flag::Carry);
     }
 
     // https://forums.nesdev.org/viewtopic.php?t=6331
     if (cpu.a as i32 ^ s) & (m as i32 ^ s) & 0x80 != 0 {
-        cpu.set_flag(StatusFlag::Overflow);
+        cpu.set_flag(Flag::Overflow);
     } else {
-        cpu.clear_flag(StatusFlag::Overflow);
+        cpu.clear_flag(Flag::Overflow);
     }
 
     // Humm
@@ -157,9 +157,9 @@ fn cmp(cpu: &mut Cpu, m: u8) {
     let val = cpu.a.wrapping_sub(m);
 
     if cpu.a >= m {
-        cpu.set_flag(StatusFlag::Carry);
+        cpu.set_flag(Flag::Carry);
     } else {
-        cpu.clear_flag(StatusFlag::Carry);
+        cpu.clear_flag(Flag::Carry);
     }
 
     cpu.update_nz(val);
@@ -169,21 +169,21 @@ fn bit(cpu: &mut Cpu, m: u8) {
     let res = cpu.a & m;
 
     if res == 0 {
-        cpu.set_flag(StatusFlag::Zero);
+        cpu.set_flag(Flag::Zero);
     } else {
-        cpu.clear_flag(StatusFlag::Zero);
+        cpu.clear_flag(Flag::Zero);
     }
 
     if m & 0b01000000 != 0 {
-        cpu.set_flag(StatusFlag::Overflow)
+        cpu.set_flag(Flag::Overflow)
     } else {
-        cpu.clear_flag(StatusFlag::Overflow)
+        cpu.clear_flag(Flag::Overflow)
     }
 
     if m & 0b10000000 != 0 {
-        cpu.set_flag(StatusFlag::Negative)
+        cpu.set_flag(Flag::Negative)
     } else {
-        cpu.clear_flag(StatusFlag::Negative)
+        cpu.clear_flag(Flag::Negative)
     }
 }
 
