@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use crate::bus::Bus;
 
 const STACK_ADDR: u16 = 0x0100;
@@ -199,7 +197,7 @@ fn nop(_cpu: &mut Cpu, _m: u8) {
 }
 
 #[repr(u8)]
-enum StatusFlag {
+enum Flag {
     Carry = 0b00000001,
     Zero = 0b00000010,
     InterruptDisable = 0b00000100,
@@ -375,8 +373,6 @@ impl Cpu {
                         .wrapping_sub((0b10000000 - (offset & 0b01111111)) as u16)
                 }
             }
-            // AddrMode::IndY => {
-            // }
             _ => panic!("Not implemented"),
         }
     }
@@ -703,32 +699,32 @@ impl Cpu {
         state
     }
 
-    fn set_flag(&mut self, flag: StatusFlag) {
+    fn set_flag(&mut self, flag: Flag) {
         let flag_repr: u8 = flag as u8;
         self.status |= flag_repr;
     }
 
-    fn clear_flag(&mut self, flag: StatusFlag) {
+    fn clear_flag(&mut self, flag: Flag) {
         let flag_repr: u8 = flag as u8;
         self.status &= !flag_repr;
     }
 
-    fn test_flag(&mut self, flag: StatusFlag) -> bool {
+    fn test_flag(&mut self, flag: Flag) -> bool {
         let flag_repr: u8 = flag as u8;
         self.status & flag_repr != 0
     }
 
     fn update_nz(&mut self, value: u8) {
         if value == 0 {
-            self.set_flag(StatusFlag::Zero)
+            self.set_flag(Flag::Zero)
         } else {
-            self.clear_flag(StatusFlag::Zero)
+            self.clear_flag(Flag::Zero)
         }
 
         if value & 0b10000000 != 0 {
-            self.set_flag(StatusFlag::Negative)
+            self.set_flag(Flag::Negative)
         } else {
-            self.clear_flag(StatusFlag::Negative)
+            self.clear_flag(Flag::Negative)
         }
     }
 
@@ -793,7 +789,7 @@ impl Cpu {
     }
 
     fn php(&mut self) {
-        self.stack_push(self.status | StatusFlag::BreakCommand as u8);
+        self.stack_push(self.status | Flag::BreakCommand as u8);
     }
 
     fn pla(&mut self) {
@@ -825,21 +821,21 @@ impl Cpu {
         let res = self.a & m;
 
         if res == 0 {
-            self.set_flag(StatusFlag::Zero);
+            self.set_flag(Flag::Zero);
         } else {
-            self.clear_flag(StatusFlag::Zero);
+            self.clear_flag(Flag::Zero);
         }
 
         if m & 0b01000000 != 0 {
-            self.set_flag(StatusFlag::Overflow)
+            self.set_flag(Flag::Overflow)
         } else {
-            self.clear_flag(StatusFlag::Overflow)
+            self.clear_flag(Flag::Overflow)
         }
 
         if m & 0b10000000 != 0 {
-            self.set_flag(StatusFlag::Negative)
+            self.set_flag(Flag::Negative)
         } else {
-            self.clear_flag(StatusFlag::Negative)
+            self.clear_flag(Flag::Negative)
         }
     }
 
@@ -849,16 +845,16 @@ impl Cpu {
 
         // Suspicious
         if s > 0xFF {
-            self.set_flag(StatusFlag::Carry);
+            self.set_flag(Flag::Carry);
         } else {
-            self.clear_flag(StatusFlag::Carry);
+            self.clear_flag(Flag::Carry);
         }
 
         // https://forums.nesdev.org/viewtopic.php?t=6331
         if (self.a as i32 ^ s) & (m as i32 ^ s) & 0x80 != 0 {
-            self.set_flag(StatusFlag::Overflow);
+            self.set_flag(Flag::Overflow);
         } else {
-            self.clear_flag(StatusFlag::Overflow);
+            self.clear_flag(Flag::Overflow);
         }
 
         // Humm
@@ -883,9 +879,9 @@ impl Cpu {
         let val = self.a.wrapping_sub(m);
 
         if self.a >= m {
-            self.set_flag(StatusFlag::Carry);
+            self.set_flag(Flag::Carry);
         } else {
-            self.clear_flag(StatusFlag::Carry);
+            self.clear_flag(Flag::Carry);
         }
 
         self.update_nz(val);
@@ -897,9 +893,9 @@ impl Cpu {
         let val = self.x.wrapping_sub(m);
 
         if self.x >= m {
-            self.set_flag(StatusFlag::Carry);
+            self.set_flag(Flag::Carry);
         } else {
-            self.clear_flag(StatusFlag::Carry);
+            self.clear_flag(Flag::Carry);
         }
 
         self.update_nz(val);
@@ -911,9 +907,9 @@ impl Cpu {
         let val = self.y.wrapping_sub(m);
 
         if self.y >= m {
-            self.set_flag(StatusFlag::Carry);
+            self.set_flag(Flag::Carry);
         } else {
-            self.clear_flag(StatusFlag::Carry);
+            self.clear_flag(Flag::Carry);
         }
 
         self.update_nz(val);
@@ -959,9 +955,9 @@ impl Cpu {
         match mode {
             AddrMode::Acc => {
                 if self.a & 0b10000000 != 0 {
-                    self.set_flag(StatusFlag::Carry);
+                    self.set_flag(Flag::Carry);
                 } else {
-                    self.clear_flag(StatusFlag::Carry);
+                    self.clear_flag(Flag::Carry);
                 }
 
                 self.a = self.a << 1;
@@ -972,9 +968,9 @@ impl Cpu {
                 let mut m = self.bus.mem_read(addr);
 
                 if m & 0b10000000 != 0 {
-                    self.set_flag(StatusFlag::Carry);
+                    self.set_flag(Flag::Carry);
                 } else {
-                    self.clear_flag(StatusFlag::Carry);
+                    self.clear_flag(Flag::Carry);
                 }
 
                 m = m << 1;
@@ -989,9 +985,9 @@ impl Cpu {
         match mode {
             AddrMode::Acc => {
                 if self.a & 1 != 0 {
-                    self.set_flag(StatusFlag::Carry);
+                    self.set_flag(Flag::Carry);
                 } else {
-                    self.clear_flag(StatusFlag::Carry);
+                    self.clear_flag(Flag::Carry);
                 }
 
                 self.a = self.a >> 1;
@@ -1002,9 +998,9 @@ impl Cpu {
                 let mut m = self.bus.mem_read(addr);
 
                 if m & 1 != 0 {
-                    self.set_flag(StatusFlag::Carry);
+                    self.set_flag(Flag::Carry);
                 } else {
-                    self.clear_flag(StatusFlag::Carry);
+                    self.clear_flag(Flag::Carry);
                 }
 
                 m = m >> 1;
@@ -1018,12 +1014,12 @@ impl Cpu {
     fn rol(&mut self, mode: AddrMode) {
         match mode {
             AddrMode::Acc => {
-                let old_carry = self.test_flag(StatusFlag::Carry);
+                let old_carry = self.test_flag(Flag::Carry);
 
                 if self.a & 0b10000000 != 0 {
-                    self.set_flag(StatusFlag::Carry);
+                    self.set_flag(Flag::Carry);
                 } else {
-                    self.clear_flag(StatusFlag::Carry);
+                    self.clear_flag(Flag::Carry);
                 }
 
                 self.a = self.a << 1;
@@ -1038,12 +1034,12 @@ impl Cpu {
                 let addr = self.read_addr(mode);
                 let mut m = self.bus.mem_read(addr);
 
-                let old_carry = self.test_flag(StatusFlag::Carry);
+                let old_carry = self.test_flag(Flag::Carry);
 
                 if m & 0b10000000 != 0 {
-                    self.set_flag(StatusFlag::Carry);
+                    self.set_flag(Flag::Carry);
                 } else {
-                    self.clear_flag(StatusFlag::Carry);
+                    self.clear_flag(Flag::Carry);
                 }
 
                 m = m << 1;
@@ -1061,12 +1057,12 @@ impl Cpu {
     fn ror(&mut self, mode: AddrMode) {
         match mode {
             AddrMode::Acc => {
-                let old_carry = self.test_flag(StatusFlag::Carry);
+                let old_carry = self.test_flag(Flag::Carry);
 
                 if self.a & 1 != 0 {
-                    self.set_flag(StatusFlag::Carry);
+                    self.set_flag(Flag::Carry);
                 } else {
-                    self.clear_flag(StatusFlag::Carry);
+                    self.clear_flag(Flag::Carry);
                 }
 
                 self.a = self.a >> 1;
@@ -1081,12 +1077,12 @@ impl Cpu {
                 let addr = self.read_addr(mode);
                 let mut m = self.bus.mem_read(addr);
 
-                let old_carry = self.test_flag(StatusFlag::Carry);
+                let old_carry = self.test_flag(Flag::Carry);
 
                 if m & 1 != 0 {
-                    self.set_flag(StatusFlag::Carry);
+                    self.set_flag(Flag::Carry);
                 } else {
-                    self.clear_flag(StatusFlag::Carry);
+                    self.clear_flag(Flag::Carry);
                 }
 
                 m = m >> 1;
@@ -1122,7 +1118,7 @@ impl Cpu {
     fn bcc(&mut self, mode: AddrMode) {
         let addr = self.read_addr(mode);
 
-        if !self.test_flag(StatusFlag::Carry) {
+        if !self.test_flag(Flag::Carry) {
             self.pc = addr;
         }
     }
@@ -1130,7 +1126,7 @@ impl Cpu {
     fn bcs(&mut self, mode: AddrMode) {
         let addr = self.read_addr(mode);
 
-        if self.test_flag(StatusFlag::Carry) {
+        if self.test_flag(Flag::Carry) {
             self.pc = addr;
         }
     }
@@ -1138,7 +1134,7 @@ impl Cpu {
     fn beq(&mut self, mode: AddrMode) {
         let addr = self.read_addr(mode);
 
-        if self.test_flag(StatusFlag::Zero) {
+        if self.test_flag(Flag::Zero) {
             self.pc = addr;
         }
     }
@@ -1146,7 +1142,7 @@ impl Cpu {
     fn bne(&mut self, mode: AddrMode) {
         let addr = self.read_addr(mode);
 
-        if !self.test_flag(StatusFlag::Zero) {
+        if !self.test_flag(Flag::Zero) {
             self.pc = addr;
         }
     }
@@ -1154,7 +1150,7 @@ impl Cpu {
     fn bmi(&mut self, mode: AddrMode) {
         let addr = self.read_addr(mode);
 
-        if self.test_flag(StatusFlag::Negative) {
+        if self.test_flag(Flag::Negative) {
             self.pc = addr;
         }
     }
@@ -1162,7 +1158,7 @@ impl Cpu {
     fn bpl(&mut self, mode: AddrMode) {
         let addr = self.read_addr(mode);
 
-        if !self.test_flag(StatusFlag::Negative) {
+        if !self.test_flag(Flag::Negative) {
             self.pc = addr;
         }
     }
@@ -1170,7 +1166,7 @@ impl Cpu {
     fn bvs(&mut self, mode: AddrMode) {
         let addr = self.read_addr(mode);
 
-        if self.test_flag(StatusFlag::Overflow) {
+        if self.test_flag(Flag::Overflow) {
             self.pc = addr;
         }
     }
@@ -1178,44 +1174,44 @@ impl Cpu {
     fn bvc(&mut self, mode: AddrMode) {
         let addr = self.read_addr(mode);
 
-        if !self.test_flag(StatusFlag::Overflow) {
+        if !self.test_flag(Flag::Overflow) {
             self.pc = addr;
         }
     }
 
     fn clc(&mut self) {
-        self.clear_flag(StatusFlag::Carry);
+        self.clear_flag(Flag::Carry);
     }
 
     fn cld(&mut self) {
-        self.clear_flag(StatusFlag::Decimal);
+        self.clear_flag(Flag::Decimal);
     }
 
     fn cli(&mut self) {
-        self.clear_flag(StatusFlag::InterruptDisable);
+        self.clear_flag(Flag::InterruptDisable);
     }
 
     fn clv(&mut self) {
-        self.clear_flag(StatusFlag::Overflow);
+        self.clear_flag(Flag::Overflow);
     }
 
     fn sec(&mut self) {
-        self.set_flag(StatusFlag::Carry);
+        self.set_flag(Flag::Carry);
     }
 
     fn sed(&mut self) {
-        self.set_flag(StatusFlag::Decimal);
+        self.set_flag(Flag::Decimal);
     }
 
     fn sei(&mut self) {
-        self.set_flag(StatusFlag::InterruptDisable);
+        self.set_flag(Flag::InterruptDisable);
     }
 
     fn brk(&mut self) {
         self.stack_push_u16(self.pc);
         self.stack_push(self.status);
 
-        self.set_flag(StatusFlag::BreakCommand);
+        self.set_flag(Flag::BreakCommand);
     }
 
     fn rti(&mut self) {
@@ -1243,9 +1239,9 @@ impl Cpu {
         let val = self.a.wrapping_sub(m);
 
         if self.a >= m {
-            self.set_flag(StatusFlag::Carry);
+            self.set_flag(Flag::Carry);
         } else {
-            self.clear_flag(StatusFlag::Carry);
+            self.clear_flag(Flag::Carry);
         }
 
         self.update_nz(val);
@@ -1264,12 +1260,12 @@ impl Cpu {
         let addr = self.read_addr(mode);
         let mut m = self.bus.mem_read(addr);
 
-        let old_carry = self.test_flag(StatusFlag::Carry);
+        let old_carry = self.test_flag(Flag::Carry);
 
         if m & 0b10000000 != 0 {
-            self.set_flag(StatusFlag::Carry);
+            self.set_flag(Flag::Carry);
         } else {
-            self.clear_flag(StatusFlag::Carry);
+            self.clear_flag(Flag::Carry);
         }
 
         m = m << 1;
@@ -1287,12 +1283,12 @@ impl Cpu {
         let addr = self.read_addr(mode);
         let mut m = self.bus.mem_read(addr);
 
-        let old_carry = self.test_flag(StatusFlag::Carry);
+        let old_carry = self.test_flag(Flag::Carry);
 
         if m & 1 != 0 {
-            self.set_flag(StatusFlag::Carry);
+            self.set_flag(Flag::Carry);
         } else {
-            self.clear_flag(StatusFlag::Carry);
+            self.clear_flag(Flag::Carry);
         }
 
         m = m >> 1;
@@ -1310,9 +1306,9 @@ impl Cpu {
         let mut m = self.bus.mem_read(addr);
 
         if m & 0b10000000 != 0 {
-            self.set_flag(StatusFlag::Carry);
+            self.set_flag(Flag::Carry);
         } else {
-            self.clear_flag(StatusFlag::Carry);
+            self.clear_flag(Flag::Carry);
         }
 
         m = m << 1;
@@ -1327,9 +1323,9 @@ impl Cpu {
         let mut m = self.bus.mem_read(addr);
 
         if m & 1 != 0 {
-            self.set_flag(StatusFlag::Carry);
+            self.set_flag(Flag::Carry);
         } else {
-            self.clear_flag(StatusFlag::Carry);
+            self.clear_flag(Flag::Carry);
         }
 
         m = m >> 1;
